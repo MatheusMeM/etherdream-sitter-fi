@@ -4,6 +4,9 @@ on:
   push:
     paths: [sitter_fi.py, build_mac.sh, assets/**, .github/workflows/build-mac.yml]
 
+permissions:
+  contents: read
+
 jobs:
   mac-arm64:
     runs-on: macos-14  # Apple Silicon (M1)
