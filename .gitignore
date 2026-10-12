@@ -1,4 +1,4 @@
-# só o necessário para o build do Mac no GitHub Actions; o resto (exe, backups, nomes) fica local
+# allowlist: only what the repo needs; exe, backups and local DAC names stay out
 *
 !.gitignore
 !.gitattributes

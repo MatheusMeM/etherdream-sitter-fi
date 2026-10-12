@@ -1,14 +1,14 @@
 #!/bin/bash
-# Gera EtherDream-Sitter-FI.app para Apple Silicon (M1/M2/M3/M4). Rodar num Mac:
+# Builds EtherDream-Sitter-FI.app for Apple Silicon (M1/M2/M3/M4). Run on a Mac:
 #   bash build_mac.sh
-# Precisa de Python 3.12+ do python.org (traz Tk 8.6). O python3 da Apple (Tk 8.5) não serve;
-# o do Homebrew precisa de `brew install python-tk`.
+# Needs Python 3.12+ from python.org (ships Tk 8.6). Apple's python3 (Tk 8.5) will not work;
+# Homebrew Python needs `brew install python-tk`.
 set -euo pipefail
 cd "$(dirname "$0")"
 D="$PWD"
 PY="${PY:-python3}"
 
-"$PY" -c "import tkinter, sys; assert tkinter.TkVersion >= 8.6, 'Tk %s: use o Python do python.org' % tkinter.TkVersion"
+"$PY" -c "import tkinter, sys; assert tkinter.TkVersion >= 8.6, 'Tk %s: use the python.org Python' % tkinter.TkVersion"
 "$PY" -m venv build-mac/venv
 . build-mac/venv/bin/activate
 pip install --quiet pyinstaller pillow
@@ -19,10 +19,10 @@ pyinstaller --noconfirm --windowed --name "EtherDream-Sitter-FI" --icon "$D/asse
 
 APP="$D/dist-mac/EtherDream-Sitter-FI.app"
 PLIST="$APP/Contents/Info.plist"
-# macOS 15+: pedido de permissão de Rede Local (broadcast UDP 7654 e TCP 7765 da Ether Dream)
-/usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Monitorar as Ether Dream da rede local.'" "$PLIST" 2>/dev/null \
-  || /usr/libexec/PlistBuddy -c "Set :NSLocalNetworkUsageDescription 'Monitorar as Ether Dream da rede local.'" "$PLIST"
-codesign --force --deep -s - "$APP"  # assinatura ad-hoc: obrigatória no Apple Silicon
+# macOS 15+: Local Network permission prompt (Ether Dream UDP 7654 broadcast and TCP 7765)
+/usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Monitors Ether Dream laser DACs on the local network.'" "$PLIST" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Set :NSLocalNetworkUsageDescription 'Monitors Ether Dream laser DACs on the local network.'" "$PLIST"
+codesign --force --deep -s - "$APP"  # ad-hoc signature: required on Apple Silicon
 
 ZIP="$D/dist-mac/EtherDream-Sitter-FI-mac-arm64.zip"
 rm -f "$ZIP"
