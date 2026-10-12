@@ -1,0 +1,20 @@
+name: build-mac
+on:
+  workflow_dispatch:
+  push:
+    paths: [sitter_fi.py, build_mac.sh, assets/**, .github/workflows/build-mac.yml]
+
+jobs:
+  mac-arm64:
+    runs-on: macos-14  # Apple Silicon (M1)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python test_sitter.py
+      - run: PY=python bash build_mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EtherDream-Sitter-FI-mac-arm64
+          path: dist-mac/EtherDream-Sitter-FI-mac-arm64.zip

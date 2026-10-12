@@ -1,0 +1,11 @@
+# só o necessário para o build do Mac no GitHub Actions; o resto (exe, backups, nomes) fica local
+*
+!.gitignore
+!.gitattributes
+!.github/
+!.github/**
+!assets/
+!assets/**
+!sitter_fi.py
+!test_sitter.py
+!build_mac.sh
