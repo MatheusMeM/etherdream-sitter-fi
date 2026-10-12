@@ -106,6 +106,73 @@ assert s.guess_via("192.168.0.80", nets) == "192.168.0.20"          # sem IP_REC
 assert s.guess_via("10.0.0.5", nets) == ""                          # duas placas, nenhuma na faixa
 assert s.guess_via("10.0.0.5", {"192.168.0.20": nets["192.168.0.20"]}) == "192.168.0.20"  # placa única
 
+class Racy(dict):  # DEV_IP limpo por mac_networks() entre o `in` e o `[]`
+    def __contains__(self, k):
+        return True
+
+    def __getitem__(self, k):
+        raise KeyError(k)
+s.DEV_IP, dev_ip = Racy(), s.DEV_IP
+assert s.guess_via("192.168.0.80", nets, "en0") == "192.168.0.20"   # sem KeyError na thread do listen
+s.DEV_IP = dev_ip
+
+# LAN hostil: enxurrada de broadcasts / MACs forjados (sem Tk: App com stubs)
+import queue, socket, threading
+from types import SimpleNamespace as NS
+noop = lambda *a, **k: None
+
+ran = []
+def again():  # callable que reenfileira: o drain antigo nunca devolvia a UI
+    ran.append(1)
+    if len(ran) < 1000:
+        app.ui.put(again)
+app = NS(root=NS(after=noop), drain=noop, ui=queue.Queue())
+app.ui.put(again)
+s.App.drain(app)
+assert len(ran) == 1
+
+def pkt(mac):
+    return bytes.fromhex(mac) + struct.pack("<HHHI", 30, 3, 3839, 180000) + bytes(20)
+app = NS(ui=queue.Queue(), nets={})
+rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+rx.bind(("127.0.0.1", 0))
+th = threading.Thread(target=s.listen, args=(rx, "127.0.0.1", app), daemon=True)
+th.start()
+tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+for i in range(3 * s.QUEUE_MAX):
+    tx.sendto(pkt("00000000%04x" % i), rx.getsockname())
+    if i % 50 == 0:
+        time.sleep(0.005)
+time.sleep(0.3)
+assert 0 < app.ui.qsize() <= s.QUEUE_MAX
+tx.close()
+rx.close()
+th.join(2)
+assert not th.is_alive()                                            # socket fechado: listener sai
+
+app = NS(dacs={}, order=[], sel=None, sync_list=noop, set_log=noop, label=str)
+for i in range(s.MAX_DACS + 10):
+    s.App.got_packet(app, pkt("00000000%04x" % i), ("10.0.0.%d" % (i % 250), 7654), "")
+assert len(app.dacs) == len(app.order) == s.MAX_DACS
+s.App.got_packet(app, pkt("000000000000"), ("10.0.0.99", 7654), "")   # DAC já conhecida continua atualizando
+assert app.dacs["000000000000"].bc.ip == "10.0.0.99"
+
+# placas do PC lidas fora da thread da UI, aplicadas dentro do tick
+pc_networks, seen = s.pc_networks, []
+s.pc_networks = lambda: seen.append(threading.current_thread()) or NETS
+app = NS(root=NS(after=noop), tick=noop, ticks=s.NET_EVERY - 1, dacs={}, nets={}, new_nets=None, refresh=noop, applied=[])
+app.read_nets = lambda: s.App.read_nets(app)
+app.sync_sockets = app.applied.append
+s.App.tick(app)
+for _i in range(200):
+    if app.new_nets or app.applied:
+        break
+    time.sleep(0.01)
+assert seen and seen[0] is not threading.main_thread()
+s.App.tick(app)
+assert app.applied == [NETS] and app.new_nets is None
+s.pc_networks = pc_networks
+
 s.LANG = "en"
 assert s.health(dac(), now)[1] == "OPERATIONAL"
 assert s._("REDE") == "NETWORK"

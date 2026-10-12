@@ -40,6 +40,10 @@ TIMEOUT_S = 5  # sem broadcast por esse tempo = offline (a DAC anuncia 1x/s; Wi-
 RETRY_S = 5    # nova tentativa de ler o firmware
 CTRL_TTL = 30  # resultado da última conexão TCP vale por esse tempo
 NET_EVERY = 10  # ticks (5 s) entre releituras das placas de rede do PC
+# ponytail: teto fixo contra broadcast forjado (tick custa ~0,4 ms por DAC); a 65ª DAC real fica de fora,
+# trocar por "descarta a offline mais antiga" se show grande precisar
+MAX_DACS = 64
+QUEUE_MAX = 500  # pacotes UDP na fila da UI; acima disso descarta (enxurrada na porta 7654)
 try:  # pausa do "clique lento" que renomeia, igual à do Windows
     DCLICK_MS = ctypes.windll.user32.GetDoubleClickTime()
 except AttributeError:
@@ -329,8 +333,9 @@ def mac_networks():
 def guess_via(dac_ip, nets, dev=None):
     """macOS (um socket só): placa que recebeu = a do IP_RECVIF; senão a que tem a DAC na faixa;
     senão a única placa ativa; senão desconhecida."""
-    if dev in DEV_IP:
-        return DEV_IP[dev]
+    ip = DEV_IP.get(dev)  # get, não in+[]: mac_networks() limpa DEV_IP em outra thread
+    if ip:
+        return ip
     for ip, (mask, _name) in nets.items():
         if ipaddress.ip_address(dac_ip) in subnet(ip, mask):
             return ip
@@ -578,6 +583,8 @@ class Led(tk.Canvas):
         self.core = self.create_oval(p, p, size - p, size - p, outline="", fill=OFF)
 
     def set(self, color, bg=None):
+        if color == self.color and bg in (None, self.bg):  # refresh chama 2x/s: não redesenha à toa
+            return
         if bg and bg != self.bg:
             self.bg = bg
             self.config(bg=bg)
@@ -609,6 +616,7 @@ class App:
         self.sel = None          # mac selecionado
         self.nets = {}           # ip local -> (máscara, placa)
         self.socks = {}          # ip local -> socket UDP
+        self.new_nets = None     # placas lidas pela thread de rede, aplicadas no próximo tick
         self.names = load_names()
         self.ticks = 0
         self.wins = {}           # janela de ajuda aberta por tipo (no máximo uma de cada)
@@ -626,7 +634,7 @@ class App:
 
         root.title("Ether Dream Sitter — Feitiçaria Industrial")
         root.configure(bg=BG)
-        self.sync_sockets()
+        self.sync_sockets(pc_networks())
         self.build()
         # tamanho único: calculado uma vez para o pior caso (aviso de rede e todas as linhas
         # reservados); depois o texto não mexe mais na janela, só o usuário redimensiona
@@ -768,11 +776,11 @@ class App:
         self.build()
 
     # --- dados -------------------------------------------------------------
-    def sync_sockets(self):
+    def sync_sockets(self, nets):
         """Windows: um socket UDP por placa IPv4, assim cada broadcast diz por qual placa chegou.
         macOS: socket preso a IP de placa não recebe broadcast; um socket só (via=None) e a placa
         vem de cada pacote (guess_via)."""
-        self.nets = pc_networks()
+        self.nets = nets
         for ip in [ip for ip in self.socks if ip not in self.nets and ip != ""]:
             self.socks.pop(ip).close()
         for ip in [""] if MAC else self.nets:
@@ -798,6 +806,8 @@ class App:
         bc = Broadcast(data, addr, via)
         dac = self.dacs.get(bc.mac)
         if dac is None:
+            if len(self.dacs) >= MAX_DACS:  # host forjando MACs não cria linhas sem fim
+                return
             dac = self.dacs[bc.mac] = Dac(bc)
             self.order.append(bc.mac)
             self.sel = self.sel or bc.mac
@@ -814,8 +824,11 @@ class App:
         automática é ler o firmware, e só com a DAC comprovadamente parada."""
         self.root.after(500, self.tick)  # antes de tudo: um erro aqui não para o relógio
         self.ticks += 1
-        if self.ticks % NET_EVERY == 0:
-            self.sync_sockets()
+        if self.ticks % NET_EVERY == 0:  # macOS: ifconfig/networksetup levam até 6 s; fora da UI
+            threading.Thread(target=self.read_nets, daemon=True).start()
+        nets, self.new_nets = self.new_nets, None
+        if nets is not None:  # aplica aqui, antes de net_issue: show_banner conta com nets e dac.net juntos
+            self.sync_sockets(nets)
         now = time.time()
         dacs = list(self.dacs.values())
         for dac in dacs:
@@ -830,6 +843,9 @@ class App:
             else:
                 self.run(dac, b"v", self.got_firmware)
         self.refresh()
+
+    def read_nets(self):
+        self.new_nets = pc_networks()
 
     def got_firmware(self, dac, result, error):
         dac.firmware = result  # None em erro: tenta de novo depois
@@ -1191,7 +1207,7 @@ class App:
 
     def drain(self):
         self.root.after(100, self.drain)  # antes de tudo: um erro num callable não para a fila
-        while True:
+        for _i in range(self.ui.qsize()):  # só o que já estava na fila: enxurrada não prende a UI
             try:
                 fn = self.ui.get_nowait()
             except queue.Empty:
@@ -1226,7 +1242,7 @@ def listen(sock, via, app):
             if sock.fileno() < 0:
                 return
             continue
-        if len(data) == 36:  # broadcast Ether Dream; ignora o resto da porta
+        if len(data) == 36 and app.ui.qsize() < QUEUE_MAX:  # broadcast Ether Dream; ignora o resto da porta
             app.ui.put(lambda d=data, a=addr, v=got: app.got_packet(d, a, v))
 
 
