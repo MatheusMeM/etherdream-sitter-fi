@@ -14,6 +14,20 @@ jobs:
           python-version: "3.13"
       - run: python test_sitter.py
       - run: PY=python bash build_mac.sh
+      - name: abre o app e confere que não caiu
+        run: |
+          APP=dist-mac/EtherDream-Sitter-FI.app/Contents/MacOS/EtherDream-Sitter-FI
+          "$APP" & PID=$!
+          sleep 15
+          LOG=~/Library/Logs/EtherDreamSitterFI/erro.log
+          [ -f "$LOG" ] && cat "$LOG"
+          kill -0 $PID && [ ! -s "$LOG" ] && echo "app rodando sem erro"
+          screencapture -x shot.png || true
+          kill $PID
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: shot.png
       - uses: actions/upload-artifact@v4
         with:
           name: EtherDream-Sitter-FI-mac-arm64
