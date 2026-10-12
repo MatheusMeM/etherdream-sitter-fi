@@ -588,12 +588,16 @@ class Led(tk.Canvas):
 
 def button(parent, text, cmd, font, primary=True):
     bg, fg, edge = (OK, BG, OK) if primary else (BG, FG, LINE)
-    b = tk.Label(parent, text=text, font=font, padx=14, pady=7, cursor="hand2", bg=bg, fg=fg,
-                 highlightthickness=1, highlightbackground=edge)
-    b.bind("<Button-1>", lambda e: cmd())
-    b.bind("<Enter>", lambda e: b.config(highlightbackground=FG))
-    b.bind("<Leave>", lambda e: b.config(highlightbackground=edge))
-    return b
+    # contorno num Frame: no macOS o Label não desenha highlight
+    box = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=edge)
+    b = tk.Label(box, text=text, font=font, padx=14, pady=7, cursor="hand2", bg=bg, fg=fg)
+    b.pack()
+    for w in (box, b):
+        w.bind("<Button-1>", lambda e: cmd())
+        w.bind("<Enter>", lambda e: box.config(highlightbackground=FG))
+        w.bind("<Leave>", lambda e: box.config(highlightbackground=edge))
+    box.paint = lambda bg, fg: (box.config(bg=bg), b.config(bg=bg, fg=fg))
+    return box
 
 
 class App:
@@ -1003,7 +1007,7 @@ class App:
     def mark(self, key, on):
         b = self.toggles.get(key)
         if b and b.winfo_exists():
-            b.config(bg=FG if on else BG, fg=BG if on else FG)
+            b.paint(FG if on else BG, BG if on else FG)
 
     def popup(self, key, title, heading):
         """Janela de ajuda tipo toggle: uma por tipo; o botão de novo fecha a que está aberta."""
